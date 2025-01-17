@@ -3,3 +3,4 @@ Datasets/*
 */__pycache__
 secrets.toml
 .env
+Cleaned Datasets/*
