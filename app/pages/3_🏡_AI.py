@@ -3,6 +3,17 @@ import folium
 from streamlit_folium import st_folium
 import os
 
+import pymongo
+import certifi
+
+# MongoDB connection setup
+ca = certifi.where()
+MONGO_URI = st.secrets["mongo"]["host"]
+
+@st.cache_resource
+def init_connection():
+    return pymongo.MongoClient(MONGO_URI, tlsCAFile=ca)
+
 dirname = os.path.dirname(__file__)
 
 def config():
