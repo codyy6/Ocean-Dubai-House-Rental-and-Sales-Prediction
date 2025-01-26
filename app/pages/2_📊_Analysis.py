@@ -137,6 +137,84 @@ def market_overview_tab():
             "dataZoom": [{"type": "slider"}]
         }
         st_echarts(guest_chart)
+        
+        # Rental Analysis
+        st.markdown("""
+            <h4>🏢 Rental Trends Analysis</h4>
+        """, unsafe_allow_html=True)
+        
+        # Fetch rental data
+        rental_data = pd.DataFrame(list(tourism_db.rents_quarterly.find()))
+        
+        # Convert relevant columns to numeric
+        rental_data['Contract Amount'] = pd.to_numeric(rental_data['Contract Amount'], errors='coerce')
+        rental_data['Property Size (sq.m)'] = pd.to_numeric(rental_data['Property Size (sq.m)'], errors='coerce')
+        
+        # Rental trends over time
+        quarterly_rentals = rental_data.groupby('Quarter')['Contract Amount'].agg(['mean', 'count']).reset_index()
+        quarterly_rentals = quarterly_rentals.sort_values('Quarter')
+
+        rental_trend_chart = {
+            "tooltip": {"trigger": "axis"},
+            "legend": {"data": ["Average Rent", "Number of Contracts"]},
+            "xAxis": {"type": "category", "data": quarterly_rentals['Quarter'].tolist()},
+            "yAxis": [
+            {"type": "value", "name": "Average Rent (AED)"}, 
+            {"type": "value", "name": "Number of Contracts"}
+            ],
+            "series": [
+            {
+                "name": "Average Rent",
+                "data": quarterly_rentals['mean'].round(2).tolist(),
+                "type": "line",
+                "smooth": True
+            },
+            {
+                "name": "Number of Contracts", 
+                "data": quarterly_rentals['count'].tolist(),
+                "type": "bar",
+                "yAxisIndex": 1
+            }
+            ],
+            "dataZoom": [{"type": "slider"}]
+        }
+        st_echarts(rental_trend_chart)
+
+        # Property type distribution
+        st.markdown("<h5>Property Type Distribution</h5>", unsafe_allow_html=True)
+        property_dist = rental_data['Property Type'].value_counts()
+        
+        property_pie = {
+            "tooltip": {"trigger": "item"},
+            "legend": {"orient": "horizontal", "bottom": "bottom"},
+            "series": [{
+            "type": "pie",
+            "data": [{"value": v, "name": k} for k,v in property_dist.items()],
+            "radius": "50%"
+            }]
+        }
+        st_echarts(property_pie)
+
+        # Area-wise average rent 
+        st.markdown("<h5>Average Rent by Area</h5>", unsafe_allow_html=True)
+        area_rent = rental_data.groupby('Area')['Contract Amount'].mean().sort_values(ascending=False)
+
+        area_bar = {
+            "tooltip": {"trigger": "axis"},
+            "xAxis": {
+            "type": "category",
+            "data": area_rent.index.tolist()[:10],
+            "axisLabel": {"rotate": 45}
+            },
+            "yAxis": {"type": "value"},
+            "series": [{
+            "data": area_rent.values.round(2).tolist()[:10],
+            "type": "bar",
+            "name": "Average Rent"
+            }]
+        }
+        st_echarts(area_bar)
+
     
     with col2:
         st.markdown("""
@@ -147,10 +225,18 @@ def market_overview_tab():
         guest_nights = revenue_data[revenue_data['Hotel Indicator'] == 'Guest Nights'].sort_values('Time Period')
         room_revenue = revenue_data[revenue_data['Hotel Indicator'] == 'Room Revenue'].sort_values('Time Period')
         
+        # Create DataFrame with aligned time periods
+        merged_data = pd.merge(
+            guest_nights[['Time Period', 'Value']].rename(columns={'Value': 'Guest Nights'}),
+            room_revenue[['Time Period', 'Value']].rename(columns={'Value': 'Room Revenue'}),
+            on='Time Period',
+            how='inner'
+        )
+        
         revenue_chart = {
             "tooltip": {"trigger": "axis"},
             "legend": {"data": ["Guest Nights", "Room Revenue"]},
-            "xAxis": {"type": "category", "data": guest_nights['Time Period'].tolist()},
+            "xAxis": {"type": "category", "data": merged_data['Time Period'].tolist()},
             "yAxis": [
             {"type": "value", "name": "Guest Nights"},
             {"type": "value", "name": "Room Revenue (AED)"}
@@ -158,13 +244,13 @@ def market_overview_tab():
             "series": [
             {
                 "name": "Guest Nights",
-                "data": guest_nights['Value'].tolist(),
+                "data": merged_data['Guest Nights'].tolist(),
                 "type": "line",
                 "smooth": True
             },
             {
                 "name": "Room Revenue",
-                "data": room_revenue['Value'].tolist(),
+                "data": merged_data['Room Revenue'].tolist(),
                 "type": "line", 
                 "smooth": True,
                 "yAxisIndex": 1
@@ -173,6 +259,60 @@ def market_overview_tab():
             "dataZoom": [{"type": "slider"}]
         }
         st_echarts(revenue_chart)
+        
+        st.markdown("""
+            <h4>🏠 Property Transaction Analysis</h4>
+        """, unsafe_allow_html=True)
+
+        transactions_data = pd.DataFrame(list(tourism_db.transactions_df_quarterly_data.find()))
+        
+        # Time series of transaction amounts and sizes
+        transactions_chart = {
+            "tooltip": {"trigger": "axis"},
+            "legend": {"data": ["Transaction Amount", "Transaction Size"]},
+            "xAxis": {"type": "category", "data": transactions_data['Quarter'].tolist()},
+            "yAxis": [
+            {"type": "value", "name": "Amount (AED)"},
+            {"type": "value", "name": "Size (sq.m)"}
+            ],
+            "series": [
+            {
+                "name": "Transaction Amount",
+                "type": "line",
+                "data": transactions_data['Amount'].tolist(),
+                "smooth": True
+            },
+            {
+                "name": "Transaction Size",
+                "type": "line",
+                "yAxisIndex": 1,
+                "data": transactions_data['Transaction Size (sq.m)'].tolist(),
+                "smooth": True
+            }
+            ],
+            "dataZoom": [{"type": "slider"}]
+        }
+        st_echarts(transactions_chart)
+
+        # Scatter plot of amount vs size
+        st.markdown("""
+            <h4>📈 Transaction Size vs Amount</h4>
+        """, unsafe_allow_html=True)
+        
+        scatter_chart = {
+            "tooltip": {"trigger": "item"},
+            "xAxis": {"type": "value", "name": "Transaction Size (sq.m)"},
+            "yAxis": {"type": "value", "name": "Amount (AED)"},
+            "series": [{
+            "type": "scatter",
+            "data": [[size, amount] for size, amount in zip(
+            transactions_data['Transaction Size (sq.m)'].tolist(),
+            transactions_data['Amount'].tolist()
+            )],
+            "symbolSize": 10
+            }]
+        }
+        st_echarts(scatter_chart)
 
 
 

@@ -6,9 +6,15 @@ import os
 import pymongo
 import certifi
 
+import requests
+from requests.structures import CaseInsensitiveDict
+
+
 # MongoDB connection setup
 ca = certifi.where()
 MONGO_URI = st.secrets["mongo"]["host"]
+
+GEOAPIFY = st.secrets["geoapify"]["key"]
 
 @st.cache_resource
 def init_connection():
@@ -46,6 +52,15 @@ def config():
 
 def render_property_predictor():
     """Render property prediction interface"""
+    
+    url = "https://api.geoapify.com/v1/geocode/search?text=38%20Upper%20Montagu%20Street%2C%20Westminster%20W1H%201LJ%2C%20United%20Kingdom&apiKey=" + GEOAPIFY
+
+    headers = CaseInsensitiveDict()
+    headers["Accept"] = "application/json"
+
+    resp = requests.get(url, headers=headers)
+
+    print(resp.status_code)
     
     # Create tabs for different prediction types
     tab1, tab2 = st.tabs(["🎯 Basic Prediction", "🎲 Advanced Prediction"])
