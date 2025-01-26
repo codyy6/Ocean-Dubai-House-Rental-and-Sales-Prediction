@@ -72,7 +72,7 @@ def market_overview_tab():
     hotel_ratings = pd.DataFrame(list(tourism_db.hotel_establishments_and_rooms_by_rating_type.find()))
     guests_data = pd.DataFrame(list(tourism_db.guests_by_hotel_type_by_region.find()))
     revenue_data = pd.DataFrame(list(tourism_db.hotel_establishments_main_indicators.find()))
-
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -109,16 +109,7 @@ def market_overview_tab():
             "dataZoom": [{"type": "slider"}]
         }
         st_echarts(hotel_chart)
-    
-    with col2:
-        st.write()
         
-    # Sales Transactions Section
-    st.subheader("🏠 Sales Market Analysis")
-    
-    col5, col6 = st.columns(2)
-    
-    with col5:
         # Guest nights chart below
         st.markdown("""
             <h4>👥 Guest Nights Analysis</h4>
@@ -146,21 +137,8 @@ def market_overview_tab():
             "dataZoom": [{"type": "slider"}]
         }
         st_echarts(guest_chart)
-        
-    with col6:
-        st.write()
-        
-
-    # Rental Transactions Section
-    st.subheader("🏠 Rental Market Analysis")
     
-    # Fetch transaction data
-    # sales_data = pd.DataFrame(list(transactions_db.sales_transactions.find()))
-    # rental_data = pd.DataFrame(list(transactions_db.rental_transactions.find()))
-
-    col3, col4 = st.columns(2)
-
-    with col3:
+    with col2:
         st.markdown("""
             <h4>💰 Guest Nights & Room Revenue Trends</h4>
         """, unsafe_allow_html=True)
@@ -195,64 +173,222 @@ def market_overview_tab():
             "dataZoom": [{"type": "slider"}]
         }
         st_echarts(revenue_chart)
-    
 
-    with col4:
-        st.write()
-        # st.markdown("<h4>🏘️ Average Rental Price by Property Type</h4>", unsafe_allow_html=True)
-        # rental_by_type = rental_data.groupby('property_type')['price'].mean().reset_index()
-        # rental_chart = {
-        #     "tooltip": {"trigger": "item"},
-        #     "legend": {"orient": "vertical", "left": "left"},
-        #     "series": [{
-        #         "name": "Rental Price",
-        #         "type": "pie",
-        #         "radius": "50%",
-        #         "data": [{"value": v, "name": k} for k, v in zip(rental_by_type['property_type'], rental_by_type['price'])]
-        #     }]
-        # }
-        # st_echarts(rental_chart)
 
 
 def macroeconomic_tab():
-    col1, col2, col3 = st.columns(3)
+    # Initialize MongoDB connections
+    tourism_db = client.tourism_db
+    
+    col1, col2 = st.columns(2)
     with col1:
         st.markdown("""
-            <div class="analysis-card">
-                <h3>💰 GDP Impact 📊</h3>
-                [Placeholder for GDP Correlation Chart]
-            </div>
+            <h4>💵 AED to USD</h4>
+        """, unsafe_allow_html=True)
+
+        aed_to_usd = pd.DataFrame(list(tourism_db.aed_to_usd_df.find()))
+        gdp_data = pd.DataFrame(list(tourism_db.gdp_quarterly_current_prices_df.find()))
+
+        # Process AED to USD data
+        aed_to_usd = aed_to_usd.sort_values('Date')
+        exchange_chart = {
+            "tooltip": {"trigger": "axis"},
+            "xAxis": {"type": "category", "data": aed_to_usd['Date'].tolist()},
+            "yAxis": {
+            "type": "value", 
+            "name": "Exchange Rate",
+            "min": aed_to_usd['Close'].min() * 0.99,  # Set min slightly below lowest value
+            "max": aed_to_usd['Close'].max() * 1.01   # Set max slightly above highest value
+            },
+            "series": [{
+            "data": aed_to_usd['Close'].tolist(),
+            "type": "line",
+            "smooth": True,
+            "name": "AED to USD",
+            "lineStyle": {"width": 2},  # Make line thicker
+            "markPoint": {
+                "data": [
+                {"type": "max", "name": "Maximum"},
+                {"type": "min", "name": "Minimum"}
+                ]
+            }
+            }],
+            "dataZoom": [{"type": "slider"}]
+        }
+        st_echarts(exchange_chart)
+
+        # Process GDP data
+        # Process GDP data
+        st.markdown("""
+            <h4>📈 GDP Growth Rates</h4>
         """, unsafe_allow_html=True)
         
-        # tourism_db.aed_to_usd_df
-        # {"_id":{"$oid":"6789f63cb2ee865657ab5275"},"Open":{"$numberDouble":"0.2723311483860016"},"High":{"$numberDouble":"0.2723682522773742"},"Low":{"$numberDouble":"0.2723311483860016"},"Close":{"$numberDouble":"0.2723682522773742"},"Adj Close":{"$numberDouble":"0.2723682522773742"},"Date":"2003-12-01","Return":{"$numberDouble":"NaN"}}
+        # Group and pivot GDP data by Measure
+        gdp_measures = gdp_data.groupby(['Time Period', 'Measure'])['Value'].mean().unstack()
         
-        # tourism_db.consumer_price_index_annually_df
-        # {"_id":{"$oid":"6789f4579a3836b33c9d2d98"},"Measure":"Index number (base year 2021 = 100)","Unit of Measure":"INDX","CPI Division":"Furniture and Household Goods","Time Period":{"$numberInt":"2021"},"Value":{"$numberDouble":"100.0"}}
-        
-        # tourism_db.consumer_price_index_monthly_df
-        # {"_id":{"$oid":"6789f4599a3836b33c9d2f09"},"Measure":"Annual Change (%)(base year 2014 = 100)","Unit of Measure":"Percentage","CPI Division":"Furniture and Household Goods","Time Period":"2009-01","Value":{"$numberDouble":"7.25"}}
-        
-        # tourism_db.consumer_price_index_quarterly_df
-        # {"_id":{"$oid":"6789f45f9a3836b33c9d4bca"},"CPI Division":"Housing, Water, Electricity, Gas","Time Period":"2022-Q1","Value (%)":{"$numberDouble":"-1.851787981"}}
-        
+        # Add measure selection
+        available_measures = gdp_measures.columns.tolist()
+        # Add measure selection with a more descriptive label and help text
+        col_gdp, col_gdp_all = st.columns([3,1])
+        with col_gdp_all:
+            if st.button('Select All GDP'):
+                selected_measures = available_measures
+                with col_gdp:
+                    selected_measures = st.multiselect(
+                    'Choose GDP Growth Rate Indicators',
+                    selected_measures,
+                    default=selected_measures,
+                    help="Select one or more GDP measures to visualize their trends over time. Multiple selections will allow you to compare different growth rates."
+                    )
+            else:
+                with col_gdp:
+                    selected_measures = st.multiselect(
+                    'Choose GDP Growth Rate Indicators',
+                    available_measures,
+                    default=available_measures[:3],
+                    help="Select one or more GDP measures to visualize their trends over time. Multiple selections will allow you to compare different growth rates."
+                    )
+        if selected_measures:
+            gdp_chart = {
+            "tooltip": {"trigger": "axis"},
+            # "legend": {"data": selected_measures},
+            "xAxis": {"type": "category", "data": gdp_measures.index.astype(str).tolist()},
+            "yAxis": {"type": "value", "name": "Growth Rate (%)"},
+            "series": [
+            {
+                "name": measure,
+                "data": gdp_measures[measure].tolist(),
+                "type": "line",
+                "smooth": True
+            } for measure in selected_measures
+            ],
+            "dataZoom": [{"type": "slider"}]
+            }
+            st_echarts(gdp_chart)
+        else:
+            st.warning("Please select at least one measure to display")
 
     
     with col2:
+        population_data = pd.DataFrame(list(tourism_db.population_indicators_df.find()))
+        
         st.markdown("""
-            <div class="analysis-card">
-                <h3>✈️ Tourism Influence 🏨</h3>
-                [Placeholder for Tourism Data]
-            </div>
+            <h4>👥 Population Indicators</h4>
         """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-            <div class="analysis-card">
-                <h3>👥 Population Growth 📈</h3>
-                [Placeholder for Population Trends]
-            </div>
-        """, unsafe_allow_html=True)
+
+        population_data = population_data.sort_values('Time_Period')
+        pop_chart = {
+            "tooltip": {"trigger": "axis"},
+            "legend": {"data": ["Population Indicators"]},
+            "xAxis": {"type": "category", "data": population_data['Time_Period'].astype(str).tolist()},
+            "yAxis": {"type": "value", "name": "Value"},
+            "series": [{
+                "name": "Population Indicators",
+                "data": population_data['Value'].tolist(),
+                "type": "line",
+                "smooth": True,
+                "markPoint": {
+                    "data": [
+                        {"type": "max", "name": "Max"},
+                        {"type": "min", "name": "Min"}
+                    ]
+                }
+            }],
+            "dataZoom": [{"type": "slider"}]
+        }
+        st_echarts(pop_chart)
+            
+        # Fetch CPI and World Development Indicator data
+        cpi_data = pd.DataFrame(list(tourism_db.consumer_price_index_monthly_df.find()))
+        wdi_data = pd.DataFrame(list(tourism_db.world_development_indicator_df.find()))
+
+        # Process CPI data
+        st.markdown("<h4>📊 Consumer Price Index by Category</h4>", unsafe_allow_html=True)
+        cpi_pivot = cpi_data.pivot_table(
+            values='Value',
+            index='Time Period',
+            columns='CPI Division',
+            aggfunc='mean'
+        ).reset_index()
+        
+        # Replace NaN values with None
+        cpi_pivot = cpi_pivot.where(pd.notnull(cpi_pivot), None)
+
+        cpi_divisions = cpi_data['CPI Division'].unique().tolist()
+        col_select, col_select_all = st.columns([3,1])
+        with col_select_all:
+            if st.button('Select All'):
+                selected_divisions = cpi_divisions
+                with col_select:
+                    st.multiselect(
+                        'Select CPI divisions to display',
+                        cpi_divisions,
+                        default=selected_divisions
+                    )
+            else:
+                with col_select:
+                    selected_divisions = st.multiselect(
+                        'Select CPI divisions to display',
+                        cpi_divisions,
+                        default=cpi_divisions[:3]
+                    )
+
+        if selected_divisions:
+            cpi_chart = {
+                "tooltip": {"trigger": "axis"},
+                "xAxis": {"type": "category", "data": cpi_pivot['Time Period'].tolist()},
+                "yAxis": {"type": "value", "name": "CPI Value"},
+                "series": [
+                    {
+                        "name": division,
+                        "type": "line",
+                        "smooth": True,
+                        "data": [None if pd.isna(x) else x for x in cpi_pivot[division].tolist()]
+                    } for division in selected_divisions
+                ],
+                "dataZoom": [{"type": "slider"}]
+            }
+            st_echarts(cpi_chart)
+
+        # Process World Development Indicator data
+        st.markdown("<h4>🌍 World Development Indicators</h4>", unsafe_allow_html=True)
+
+        # Convert years to numeric columns
+        year_columns = [str(year) for year in range(1960, 2024)]
+        
+        # Add indicator selection
+        available_indicators = wdi_data['Indicator Name'].unique().tolist()
+        selected_indicator = st.selectbox(
+            'Select World Development Indicator',
+            available_indicators,
+            help="Choose an indicator to visualize its trend over time"
+        )
+
+        # Filter data for selected indicator
+        indicator_data = wdi_data[wdi_data['Indicator Name'] == selected_indicator]
+        indicator_values = [indicator_data[year].iloc[0] for year in year_columns if year in indicator_data.columns]
+        valid_years = [year for year in year_columns if year in indicator_data.columns]
+
+        indicator_chart = {
+            "tooltip": {"trigger": "axis"},
+            "xAxis": {"type": "category", "data": valid_years},
+            "yAxis": {"type": "value", "name": selected_indicator},
+            "series": [{
+            "name": selected_indicator,
+            "type": "line",
+            "data": indicator_values,
+            "smooth": True,
+            "markPoint": {
+                "data": [
+                {"type": "max", "name": "Maximum"},
+                {"type": "min", "name": "Minimum"}
+                ]
+            }
+            }],
+            "dataZoom": [{"type": "slider"}]
+        }
+        st_echarts(indicator_chart)
+
 
 
 def investment_tab():
@@ -281,23 +417,22 @@ def investment_tab():
             </div>
         """, unsafe_allow_html=True)
 
+def correlation_tab():
+    """"""
+
 def render_view():
     # Create tabs
-    tab1, tab2, tab3 = st.tabs([
-        "🏘️ Market Overview", 
-        "🌍 Macroeconomic Factors", 
-        "💡 Investment Insights"
-    ])
+    st.subheader("🏘️ Market Overview")
+    market_overview_tab()
     
-    with tab1:
-        market_overview_tab()
+    st.subheader("🌍 Macroeconomic Factors")
+    macroeconomic_tab()
     
-    with tab2:
-        macroeconomic_tab()
+    st.subheader("💡 Investment Insights")
+    investment_tab()
     
-    with tab3:
-        investment_tab()
-        
+    st.subheader("⫻ Correlation")
+    correlation_tab()
 if __name__ == "__main__":
     config()
     render_view()

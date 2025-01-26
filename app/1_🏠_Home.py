@@ -71,27 +71,27 @@ def main():
         
     with col2:
         st.markdown("""
-        ### Price Prediction
-        - Machine learning models
-        - Real-time market data
-        - Accurate forecasting
+        ### 🔮 Price Prediction
+        - 🤖 Machine learning models
+        - 📊 Real-time market data
+        - 🎯 Accurate forecasting
         """)
         
     with col3:
         st.markdown("""
-        ### Market Intelligence
-        - Market trends
-        - Investment opportunities
-        - Economic indicators
+        ### 📈 Market Intelligence
+        - 📊 Market trends
+        - 💰 Investment opportunities
+        - 📈 Economic indicators
         """)
     
     # How It Works
-    st.header("How It Works")
+    st.header("⚙️ How It Works")
     st.write("""
-    1. Input property details
-    2. Get instant price predictions
-    3. View detailed market analysis
-    4. Make informed decisions
+    1. 📝 Input property details
+    2. ⚡ Get instant price predictions
+    3. 📊 View detailed market analysis
+    4. 🎯 Make informed decisions
     """)
     
     # Connect to MongoDB and display any relevant data
