@@ -378,7 +378,7 @@ def market_overview_tab():
         # Create a base map centered on Dubai
         def create_map():
             # Create a base map centered on Dubai
-            m = folium.Map(location=[25.2048, 55.2708], zoom_start=6))
+            m = folium.Map(location=[25.2048, 55.2708], zoom_start=6)
 
             # Filter out rows with missing coordinates and get unique lat/long combinations
             valid_data = rental_data[
