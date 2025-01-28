@@ -14,8 +14,6 @@ from requests.structures import CaseInsensitiveDict
 # MongoDB connection setup
 ca = certifi.where()
 MONGO_URI = st.secrets["mongo"]["host"]
-MONGO_URI1 = st.secrets["mongo1"]["host"]
-MONGO_URI2 = st.secrets["mongo2"]["host"]
 
 GEOAPIFY = st.secrets["geoapify"]["key"]
 
