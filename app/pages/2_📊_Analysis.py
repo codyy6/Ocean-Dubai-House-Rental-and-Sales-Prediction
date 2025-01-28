@@ -5,6 +5,11 @@ import pymongo
 import certifi
 
 from streamlit_echarts import st_echarts
+import folium
+from streamlit_folium import st_folium, folium_static
+
+import requests
+from requests.structures import CaseInsensitiveDict
 
 # MongoDB connection setup
 ca = certifi.where()
@@ -12,19 +17,19 @@ MONGO_URI = st.secrets["mongo"]["host"]
 MONGO_URI1 = st.secrets["mongo1"]["host"]
 MONGO_URI2 = st.secrets["mongo2"]["host"]
 
+GEOAPIFY = st.secrets["geoapify"]["key"]
+
 @st.cache_resource
 def init_connection():
     return pymongo.MongoClient(MONGO_URI, tlsCAFile=ca)
 
-@st.cache_resource
-def init_sec_connection():
-    return pymongo.MongoClient(MONGO_URI1, tlsCAFile=ca)
-
-@st.cache_resource
-def init_third_connection():
-    return pymongo.MongoClient(MONGO_URI2, tlsCAFile=ca)
-
 client = init_connection()
+
+def parse_quarter(q_str):
+    year = int(q_str[:4])
+    quarter = int(q_str[-1])
+    return pd.Period(year=year, quarter=quarter, freq='Q')
+
 
 def config():
     mongo_instance = init_connection()
@@ -63,6 +68,20 @@ def config():
         }
         </style>
     """, unsafe_allow_html=True)
+
+def get_coordinates(address):
+    url = f"https://api.geoapify.com/v1/geocode/search?text={address}, Dubai, UAE&apiKey={GEOAPIFY}"
+    headers = CaseInsensitiveDict()
+    headers["Accept"] = "application/json"
+
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        if data['features']:
+            lat = data['features'][0]['properties']['lat']
+            lon = data['features'][0]['properties']['lon']
+            return lat, lon
+    return 0, 0
     
 def market_overview_tab():
     # Initialize MongoDB connections
@@ -145,38 +164,47 @@ def market_overview_tab():
         
         # Fetch rental data
         rental_data = pd.DataFrame(list(tourism_db.rents_quarterly.find()))
-        
+
         # Convert relevant columns to numeric
         rental_data['Contract Amount'] = pd.to_numeric(rental_data['Contract Amount'], errors='coerce')
         rental_data['Property Size (sq.m)'] = pd.to_numeric(rental_data['Property Size (sq.m)'], errors='coerce')
-        
+
+        # Parse and sort quarters
+        rental_data['Quarter'] = rental_data['Quarter'].apply(parse_quarter)
+        rental_data = rental_data.sort_values('Quarter')
+
         # Rental trends over time
         quarterly_rentals = rental_data.groupby('Quarter')['Contract Amount'].agg(['mean', 'count']).reset_index()
-        quarterly_rentals = quarterly_rentals.sort_values('Quarter')
+        formatted_quarters = quarterly_rentals['Quarter'].dt.strftime('%Y-Q%q').tolist()
 
         rental_trend_chart = {
             "tooltip": {"trigger": "axis"},
             "legend": {"data": ["Average Rent", "Number of Contracts"]},
-            "xAxis": {"type": "category", "data": quarterly_rentals['Quarter'].tolist()},
+            "xAxis": {
+                "type": "category", 
+                "data": formatted_quarters,
+                "axisLabel": {"rotate": 45}
+            },
             "yAxis": [
-            {"type": "value", "name": "Average Rent (AED)"}, 
-            {"type": "value", "name": "Number of Contracts"}
+                {"type": "value", "name": "Average Rent (AED)"}, 
+                {"type": "value", "name": "Number of Contracts"}
             ],
             "series": [
-            {
-                "name": "Average Rent",
-                "data": quarterly_rentals['mean'].round(2).tolist(),
-                "type": "line",
-                "smooth": True
-            },
-            {
-                "name": "Number of Contracts", 
-                "data": quarterly_rentals['count'].tolist(),
-                "type": "bar",
-                "yAxisIndex": 1
-            }
+                {
+                    "name": "Average Rent",
+                    "data": quarterly_rentals['mean'].round(2).tolist(),
+                    "type": "line",
+                    "smooth": True
+                },
+                {
+                    "name": "Number of Contracts", 
+                    "data": quarterly_rentals['count'].tolist(),
+                    "type": "bar",
+                    "yAxisIndex": 1
+                }
             ],
-            "dataZoom": [{"type": "slider"}]
+            "dataZoom": [{"type": "slider"}],
+            "grid": {"bottom": "15%"}
         }
         st_echarts(rental_trend_chart)
 
@@ -265,32 +293,47 @@ def market_overview_tab():
         """, unsafe_allow_html=True)
 
         transactions_data = pd.DataFrame(list(tourism_db.transactions_df_quarterly_data.find()))
-        
-        # Time series of transaction amounts and sizes
+
+        # Convert and sort quarters
+        transactions_data['Quarter'] = transactions_data['Quarter'].apply(parse_quarter)
+        transactions_data = transactions_data.sort_values('Quarter')
+
+        # Format quarters for display
+        formatted_quarters = transactions_data['Quarter'].dt.strftime('%Y-Q%q').tolist()
+
         transactions_chart = {
             "tooltip": {"trigger": "axis"},
             "legend": {"data": ["Transaction Amount", "Transaction Size"]},
-            "xAxis": {"type": "category", "data": transactions_data['Quarter'].tolist()},
+            "xAxis": {
+                "type": "category", 
+                "data": formatted_quarters,
+                "axisLabel": {
+                    "rotate": 45
+                }
+            },
             "yAxis": [
-            {"type": "value", "name": "Amount (AED)"},
-            {"type": "value", "name": "Size (sq.m)"}
+                {"type": "value", "name": "Amount (AED)"},
+                {"type": "value", "name": "Size (sq.m)"}
             ],
             "series": [
-            {
-                "name": "Transaction Amount",
-                "type": "line",
-                "data": transactions_data['Amount'].tolist(),
-                "smooth": True
-            },
-            {
-                "name": "Transaction Size",
-                "type": "line",
-                "yAxisIndex": 1,
-                "data": transactions_data['Transaction Size (sq.m)'].tolist(),
-                "smooth": True
-            }
+                {
+                    "name": "Transaction Amount",
+                    "type": "line",
+                    "data": transactions_data['Amount'].tolist(),
+                    "smooth": True
+                },
+                {
+                    "name": "Transaction Size",
+                    "type": "line",
+                    "yAxisIndex": 1,
+                    "data": transactions_data['Transaction Size (sq.m)'].tolist(),
+                    "smooth": True
+                }
             ],
-            "dataZoom": [{"type": "slider"}]
+            "dataZoom": [{"type": "slider"}],
+            "grid": {
+                "bottom": "15%"
+            }
         }
         st_echarts(transactions_chart)
 
@@ -313,7 +356,51 @@ def market_overview_tab():
             }]
         }
         st_echarts(scatter_chart)
+        
+        
+        # Create a base map centered on Dubai
+        def create_map():
+            # Create a base map centered on Dubai
+            m = folium.Map(location=[25.2048, 55.2708], zoom_start=6)
 
+            # Fetch rental data
+            rental_data = pd.DataFrame(list(tourism_db.rents_quarterly.find()))
+
+            # Filter out rows with missing coordinates and get unique lat/long combinations
+            valid_data = rental_data[
+                rental_data['Latitude'].notna() & 
+                rental_data['Longitude'].notna()
+            ].drop_duplicates(subset=['Latitude', 'Longitude'])
+
+            # Create markers for each unique location
+            for _, row in valid_data.iterrows():
+                popup_html = f"""
+                <b>Area:</b> {row['Area']}<br>
+                <b>Property Type:</b> {row['Property Type']}<br>
+                <b>Property Sub Type:</b> {row['Property Sub Type']}<br>
+                <b>Usage:</b> {row['Usage']}<br>
+                <b>Contract Amount:</b> {row['Contract Amount']:,.0f} AED<br>
+                <b>Nearest Metro:</b> {row['Nearest Metro']}<br>
+                <b>Nearest Mall:</b> {row['Nearest Mall']}<br>
+                <b>Nearest Landmark:</b> {row['Nearest Landmark']}
+                """
+                
+                folium.Marker(
+                    [row['Latitude'], row['Longitude']], 
+                    popup=folium.Popup(popup_html, max_width=300),
+                    tooltip=row['Area']
+                ).add_to(m)
+            
+            heat_data = valid_data[['Latitude', 'Longitude']].values.tolist()
+            folium.plugins.HeatMap(heat_data).add_to(m)
+            
+            return m
+
+        # Display the map
+        m = create_map()
+        # Add heatmap
+        st.markdown("<h4>📍 Property Density Heatmap</h4>", unsafe_allow_html=True)
+        folium_static(m, width=700, height=500)
 
 
 def macroeconomic_tab():
@@ -558,7 +645,201 @@ def investment_tab():
         """, unsafe_allow_html=True)
 
 def correlation_tab():
-    """"""
+    try:
+        tourism_db = client.tourism_db
+        
+        # Fetch and process data with proper alignment
+        rental_data = pd.DataFrame(list(tourism_db.rents_quarterly.find()))
+        rental_data['Quarter'] = pd.to_datetime(rental_data['Quarter'].apply(lambda x: x[:4] + '-' + str(int(x[-1]) * 3)), format='ISO8601')
+        rental_data['Quarter'] = rental_data['Quarter'].dt.to_period('Q').dt.end_time
+
+        # Create quarterly metrics
+        rental_metrics = rental_data.resample('QE', on='Quarter').agg({
+            'Contract Amount': 'mean',
+            'Quarter': 'count'
+        }).rename(columns={
+            'Contract Amount': 'Average_Rent',
+            'Quarter': 'Transaction_Volume'
+        })
+
+        # GDP data
+        gdp_data = pd.DataFrame(list(tourism_db.gdp_quarterly_current_prices_df.find()))
+        gdp_data['Time Period'] = gdp_data.apply(lambda row: pd.Timestamp(f"{int(row['Time Period'])}-{int(row['Quarter'][-1])*3}-01"), axis=1)
+        
+        # Group by Time Period and sum values for the same date
+        gdp_data = gdp_data.groupby('Time Period', as_index=False)['Value'].sum()
+        
+        # Convert to quarterly data and handle duplicates
+        gdp_data['Time Period'] = pd.to_datetime(gdp_data['Time Period'])
+        gdp_growth = gdp_data \
+            .set_index('Time Period')['Value'] \
+            .resample('QE').sum() \
+            .drop_duplicates() \
+            .to_frame('GDP_Growth')
+
+
+        # CPI data
+        cpi_data = pd.DataFrame(list(tourism_db.consumer_price_index_monthly_df.find()))
+        cpi_data['Time Period'] = pd.to_datetime(cpi_data['Time Period'])
+        cpi_quarterly = cpi_data.resample('QE', on='Time Period')['Value'].mean() \
+            .to_frame('CPI')
+
+        # Population data
+        population_data = pd.DataFrame(list(tourism_db.population_indicators_df.find()))
+        population_data['Time_Period'] = pd.to_datetime(population_data['Time_Period'].astype(str) + '-01')
+
+        # Create quarterly data with unique indices
+        pop_quarterly = []
+        for _, row in population_data.iterrows():
+            year = row['Time_Period'].year
+            for quarter in range(1, 5):
+                quarter_date = pd.Timestamp(f"{year}-{3*quarter}-01")
+                pop_quarterly.append({
+                    'Time_Period': quarter_date,
+                    'Value': row['Value']
+                })
+
+        # Convert to DataFrame and ensure unique index
+        population_df = pd.DataFrame(pop_quarterly)
+        population_df = population_df.drop_duplicates('Time_Period')
+        population_clean = population_df.set_index('Time_Period')['Value'].to_frame('Population')
+
+        # Sort index and handle any remaining duplicates
+        population_clean = population_clean.sort_index()
+        population_clean = population_clean[~population_clean.index.duplicated(keep='first')]
+
+
+        # Create common index
+        start_date = min(
+            rental_metrics.index.min(),
+            gdp_growth.index.min(),
+            cpi_quarterly.index.min(),
+            population_clean.index.min()
+        )
+        end_date = max(
+            rental_metrics.index.max(),
+            gdp_growth.index.max(),
+            cpi_quarterly.index.max(),
+            population_clean.index.max()
+        )
+        full_index = pd.date_range(start=start_date, end=end_date, freq='QE')
+
+        # Reindex all dataframes with common index
+        dfs = {
+            'Rental': rental_metrics,
+            'GDP': gdp_growth,
+            'CPI': cpi_quarterly,
+            'Population': population_clean
+        }
+
+        aligned_dfs = []
+        for name, df in dfs.items():
+            aligned = df.reindex(full_index)
+            aligned.columns = [f"{name}_{col}" for col in aligned.columns]
+            aligned_dfs.append(aligned)
+
+        # Combine aligned dataframes
+        correlation_df = pd.concat(aligned_dfs, axis=1)
+
+        # Calculate correlation matrix
+        corr_matrix = correlation_df.corr().round(2)
+        
+        col1, col2 = st.columns([2,1])
+        
+        with col1:
+            st.markdown("<h4> 📊 Correlation Heatmap</h4>", unsafe_allow_html=True)
+            
+            # Generate heatmap data with proper axis labels
+            heatmap_data = []
+            for i, row_var in enumerate(corr_matrix.index):
+                for j, col_var in enumerate(corr_matrix.columns):
+                    value = corr_matrix.loc[row_var, col_var]
+                    if not pd.isna(value):
+                        heatmap_data.append([j, i, float(value)])  # Note j comes first for x-axis
+
+            heatmap = {
+                "tooltip": {"trigger": "item"},
+                "visualMap": {
+                    "min": -1,
+                    "max": 1,
+                    "calculable": True,
+                    "orient": 'horizontal',
+                    "left": 'center',
+                    "bottom": '12%',
+                    "inRange": {"color": ['#313695', '#4575b4', '#74add1', '#abd9e9', '#ffffbf', '#fee090', '#fdae61', '#f46d43', '#d73027', '#a50026']}
+                },
+                "xAxis": {
+                    "type": "category",
+                    "data": corr_matrix.columns.tolist(),
+                    "axisLabel": {
+                        "rotate": 45,
+                        "interval": 0,
+                        "fontSize": 10
+                    }
+                },
+                "yAxis": {
+                    "type": "category",
+                    "data": corr_matrix.index.tolist(),
+                    "axisLabel": {
+                        "rotate": 0,
+                        "fontSize": 10
+                    }
+                },
+                "series": [{
+                    "type": "heatmap",
+                    "data": heatmap_data,
+                    "label": {"show": True, "fontSize": 10},
+                    "emphasis": {"itemStyle": {"shadowBlur": 10, "shadowColor": 'rgba(0,0,0,0.5)'}}
+                }],
+                "grid": {
+                    "top": "15%",
+                    "bottom": "25%",
+                    "left": "20%",
+                    "right": "5%"
+                }
+            }
+            
+            st_echarts(heatmap, height="600px")
+            
+            
+        with col2:
+            st.markdown("<h4> 📈 Data Coverage</h4>", unsafe_allow_html=True)
+            st.write(f"Time period: {correlation_df.index.min()} to {correlation_df.index.max()}")
+            st.write(f"Number of quarters: {len(correlation_df)}")
+            st.write("Data completeness:")
+            for col in correlation_df.columns:
+                pct_complete = (correlation_df[col].notna().sum() / len(correlation_df) * 100).round(1)
+                st.write(f"{col}: {pct_complete}%")
+        
+        
+            st.markdown("<h4> 🔍 Key Insights</h4>", unsafe_allow_html=True)
+            valid_correlations = [
+                {
+                    'factor1': col1,
+                    'factor2': col2,
+                    'correlation': float(corr_matrix.loc[col1, col2])
+                }
+                for col1 in corr_matrix.columns
+                for col2 in corr_matrix.columns
+                if col1 < col2 and not pd.isna(corr_matrix.loc[col1, col2])
+            ]
+            
+            valid_correlations.sort(key=lambda x: abs(x['correlation']), reverse=True)
+            
+            for corr in valid_correlations[:5]:
+                st.markdown(f"""
+                    <div style='padding:10px; background-color:#f0f2f6; border-radius:5px; margin:5px;'>
+                        <b>{corr['factor1']}</b> vs <b>{corr['factor2']}</b><br>
+                        {'Strong' if abs(corr['correlation']) > 0.7 else 'Moderate'} 
+                        {'positive' if corr['correlation'] > 0 else 'negative'} 
+                        correlation: {corr['correlation']:.2f}
+                    </div>
+                """, unsafe_allow_html=True)
+                
+    except Exception as e:
+        st.error(f"Error in correlation analysis: {str(e)}")
+        st.write("Please check data integrity and time period alignment")
+
 
 def render_view():
     # Create tabs
@@ -568,11 +849,12 @@ def render_view():
     st.subheader("🌍 Macroeconomic Factors")
     macroeconomic_tab()
     
+    st.subheader("⫻ Correlation")
+    correlation_tab()
+    
     st.subheader("💡 Investment Insights")
     investment_tab()
     
-    st.subheader("⫻ Correlation")
-    correlation_tab()
 if __name__ == "__main__":
     config()
     render_view()
