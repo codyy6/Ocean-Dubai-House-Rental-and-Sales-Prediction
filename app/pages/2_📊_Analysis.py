@@ -21,13 +21,35 @@ GEOAPIFY = st.secrets["geoapify"]["key"]
 def init_connection():
     return pymongo.MongoClient(MONGO_URI, tlsCAFile=ca)
 
-client = init_connection()
+@st.cache_data
+def fetch_global_data():
+    """Fetch and cache all data from MongoDB"""
+    tourism_db = client.tourism_db
+    try:
+        return {
+            'hotel_ratings': pd.DataFrame(list(tourism_db.hotel_establishments_and_rooms_by_rating_type.find())),
+            'guests_data': pd.DataFrame(list(tourism_db.guests_by_hotel_type_by_region.find())),
+            'revenue_data': pd.DataFrame(list(tourism_db.hotel_establishments_main_indicators.find())),
+            'rental_data': pd.DataFrame(list(tourism_db.rents_quarterly.find())),
+            'transactions_data': pd.DataFrame(list(tourism_db.transactions_df_quarterly_data.find())),
+            'gdp_data': pd.DataFrame(list(tourism_db.gdp_quarterly_current_prices_df.find())),
+            'cpi_data': pd.DataFrame(list(tourism_db.consumer_price_index_monthly_df.find())),
+            'population_data': pd.DataFrame(list(tourism_db.population_indicators_df.find())),
+            'aed_to_usd': pd.DataFrame(list(tourism_db.aed_to_usd_df.find())),
+            'wdi_data': pd.DataFrame(list(tourism_db.world_development_indicator_df.find()))
+        }
+    except Exception as e:
+        st.error(f"Error fetching data: {str(e)}")
+        return {}
 
 def parse_quarter(q_str):
     year = int(q_str[:4])
     quarter = int(q_str[-1])
     return pd.Period(year=year, quarter=quarter, freq='Q')
 
+# Global scope variable
+client = init_connection()
+global_data = fetch_global_data()
 
 def config():
     mongo_instance = init_connection()
@@ -83,13 +105,15 @@ def get_coordinates(address):
     
 def market_overview_tab():
     # Initialize MongoDB connections
-    tourism_db = client.tourism_db
-
-    # Fetch data from MongoDB collections
-    hotel_ratings = pd.DataFrame(list(tourism_db.hotel_establishments_and_rooms_by_rating_type.find()))
-    guests_data = pd.DataFrame(list(tourism_db.guests_by_hotel_type_by_region.find()))
-    revenue_data = pd.DataFrame(list(tourism_db.hotel_establishments_main_indicators.find()))
-    
+    if not global_data:
+        st.error("Unable to load data")
+        return
+        
+    hotel_ratings = global_data['hotel_ratings']
+    guests_data = global_data['guests_data']
+    revenue_data = global_data['revenue_data']
+    rental_data = global_data['rental_data']
+    transactions_data = global_data['transactions_data']
     col1, col2 = st.columns(2)
     
     with col1:
@@ -160,9 +184,6 @@ def market_overview_tab():
             <h4>🏢 Rental Trends Analysis</h4>
         """, unsafe_allow_html=True)
         
-        # Fetch rental data
-        rental_data = pd.DataFrame(list(tourism_db.rents_quarterly.find()))
-
         # Convert relevant columns to numeric
         rental_data['Contract Amount'] = pd.to_numeric(rental_data['Contract Amount'], errors='coerce')
         rental_data['Property Size (sq.m)'] = pd.to_numeric(rental_data['Property Size (sq.m)'], errors='coerce')
@@ -290,8 +311,6 @@ def market_overview_tab():
             <h4>🏠 Property Transaction Analysis</h4>
         """, unsafe_allow_html=True)
 
-        transactions_data = pd.DataFrame(list(tourism_db.transactions_df_quarterly_data.find()))
-
         # Convert and sort quarters
         transactions_data['Quarter'] = transactions_data['Quarter'].apply(parse_quarter)
         transactions_data = transactions_data.sort_values('Quarter')
@@ -359,10 +378,7 @@ def market_overview_tab():
         # Create a base map centered on Dubai
         def create_map():
             # Create a base map centered on Dubai
-            m = folium.Map(location=[25.2048, 55.2708], zoom_start=6)
-
-            # Fetch rental data
-            rental_data = pd.DataFrame(list(tourism_db.rents_quarterly.find()))
+            m = folium.Map(location=[25.2048, 55.2708], zoom_start=6))
 
             # Filter out rows with missing coordinates and get unique lat/long combinations
             valid_data = rental_data[
@@ -402,17 +418,21 @@ def market_overview_tab():
 
 
 def macroeconomic_tab():
-    # Initialize MongoDB connections
-    tourism_db = client.tourism_db
+    if not global_data:
+        st.error("Unable to load data")
+        return
+        
+    aed_to_usd = global_data['aed_to_usd']
+    gdp_data = global_data['gdp_data']
+    cpi_data = global_data['cpi_data']
+    population_data = global_data['population_data']
+    wdi_data = global_data['wdi_data']
     
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("""
             <h4>💵 AED to USD</h4>
         """, unsafe_allow_html=True)
-
-        aed_to_usd = pd.DataFrame(list(tourism_db.aed_to_usd_df.find()))
-        gdp_data = pd.DataFrame(list(tourism_db.gdp_quarterly_current_prices_df.find()))
 
         # Process AED to USD data
         aed_to_usd = aed_to_usd.sort_values('Date')
@@ -494,9 +514,7 @@ def macroeconomic_tab():
             st.warning("Please select at least one measure to display")
 
     
-    with col2:
-        population_data = pd.DataFrame(list(tourism_db.population_indicators_df.find()))
-        
+    with col2:        
         st.markdown("""
             <h4>👥 Population Indicators</h4>
         """, unsafe_allow_html=True)
@@ -522,10 +540,6 @@ def macroeconomic_tab():
             "dataZoom": [{"type": "slider"}]
         }
         st_echarts(pop_chart)
-            
-        # Fetch CPI and World Development Indicator data
-        cpi_data = pd.DataFrame(list(tourism_db.consumer_price_index_monthly_df.find()))
-        wdi_data = pd.DataFrame(list(tourism_db.world_development_indicator_df.find()))
 
         # Process CPI data
         st.markdown("<h4>📊 Consumer Price Index by Category</h4>", unsafe_allow_html=True)
@@ -644,10 +658,16 @@ def investment_tab():
 
 def correlation_tab():
     try:
-        tourism_db = client.tourism_db
+         if not global_data:
+        st.error("Unable to load data")
+        return
+        
+        rental_data = global_data['rental_data']
+        gdp_data = global_data['gdp_data']
+        cpi_data = global_data['cpi_data']
+        population_data = global_data['population_data']
         
         # Fetch and process data with proper alignment
-        rental_data = pd.DataFrame(list(tourism_db.rents_quarterly.find()))
         rental_data['Quarter'] = pd.to_datetime(rental_data['Quarter'].apply(lambda x: x[:4] + '-' + str(int(x[-1]) * 3)), format='ISO8601')
         rental_data['Quarter'] = rental_data['Quarter'].dt.to_period('Q').dt.end_time
 
@@ -661,7 +681,6 @@ def correlation_tab():
         })
 
         # GDP data
-        gdp_data = pd.DataFrame(list(tourism_db.gdp_quarterly_current_prices_df.find()))
         gdp_data['Time Period'] = gdp_data.apply(lambda row: pd.Timestamp(f"{int(row['Time Period'])}-{int(row['Quarter'][-1])*3}-01"), axis=1)
         
         # Group by Time Period and sum values for the same date
@@ -677,13 +696,11 @@ def correlation_tab():
 
 
         # CPI data
-        cpi_data = pd.DataFrame(list(tourism_db.consumer_price_index_monthly_df.find()))
         cpi_data['Time Period'] = pd.to_datetime(cpi_data['Time Period'])
         cpi_quarterly = cpi_data.resample('QE', on='Time Period')['Value'].mean() \
             .to_frame('CPI')
 
         # Population data
-        population_data = pd.DataFrame(list(tourism_db.population_indicators_df.find()))
         population_data['Time_Period'] = pd.to_datetime(population_data['Time_Period'].astype(str) + '-01')
 
         # Create quarterly data with unique indices
