@@ -60,8 +60,6 @@ def render_property_predictor():
 
     resp = requests.get(url, headers=headers)
 
-    print(resp.status_code)
-    
     # Create tabs for different prediction types
     tab1, tab2 = st.tabs(["🎯 Basic Prediction", "🎲 Advanced Prediction"])
     

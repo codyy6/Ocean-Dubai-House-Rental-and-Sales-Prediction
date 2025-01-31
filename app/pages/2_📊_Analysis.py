@@ -11,11 +11,19 @@ from streamlit_folium import st_folium, folium_static
 import requests
 from requests.structures import CaseInsensitiveDict
 
+import os
+from mistralai import Mistral
+
+
 # MongoDB connection setup
 ca = certifi.where()
 MONGO_URI = st.secrets["mongo"]["host"]
 
 GEOAPIFY = st.secrets["geoapify"]["key"]
+
+MISTRAL_API_KEY = st.secrets["mistral"]["key"]
+MODEL = "mistral-large-latest"
+client = Mistral(api_key=MISTRAL_API_KEY)
 
 @st.cache_resource
 def init_connection():
@@ -31,6 +39,217 @@ def fetch_data(collection_name):
     except Exception as e:
         st.error(f"Error fetching {collection_name}: {str(e)}")
         return pd.DataFrame()
+
+def mistral_analysis(prompt, data):
+    """Generate investment insights using Mistral AI"""
+    try:
+        # Calculate metrics
+        metrics = calculate_market_metrics(data)
+        
+        # Create analysis message
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a real estate market analysis expert. Analyze the data and provide detailed insights. Add necessary emoji to make conversation looks more fun to read"
+            },
+            {
+                "role": "user",
+                "content": f"""
+                Based on the provided real estate market data:
+                
+                {prompt}
+                
+                Key metrics:
+                {metrics}
+                
+                Provide a detailed analysis structured in sections according to the prompt
+                """
+            }
+        ]
+        
+        # Generate analysis
+        response = client.chat.complete(
+            model=MODEL,
+            messages=messages
+        )
+        
+        st.write(response.choices[0].message.content)
+        
+        return response.choices[0].message.content
+        
+    except Exception as e:
+        return f"Error in AI analysis: {str(e)}"
+
+def calculate_market_metrics(data):
+    """Calculate key market metrics from datasets"""
+    metrics = []
+    
+    for name, df in data.items():
+        if name == "Rental Market":
+            metrics.append(f"Average Rent: {df['Contract Amount'].mean():,.0f} AED")
+            metrics.append(f"Rental Volume: {len(df):,} transactions")
+            
+        elif name == "GDP Growth":
+            metrics.append(f"GDP Growth Rate: {df['Value'].mean():.1f}%")
+            
+        elif name == "Property Transactions":
+            metrics.append(f"Transaction Volume: {len(df):,}")
+            metrics.append(f"Average Transaction Value: {df['Amount'].mean():,.0f} AED")
+    
+    return "\n".join(metrics)
+
+def generate_market_insights(data, start_date, end_date):
+    """Generate structured market insights using Mistral"""
+    prompt = f"""
+    Analyze Dubai real estate market data ({start_date} to {end_date}):
+    1. Current market phase and trends
+    2. Investment opportunities by area/type
+    """
+    
+    try:
+        analysis = mistral_analysis(prompt, data)
+        return {
+            'market_analysis': extract_section(analysis, 'Market Analysis'),
+            'opportunities': extract_section(analysis, 'Opportunities'),
+            'risks': extract_section(analysis, 'Risks')
+        }
+    except Exception as e:
+        return {
+            'market_analysis': f"Analysis error: {str(e)}",
+            'opportunities': "Unable to generate opportunities",
+            'risks': "Unable to assess risks"
+        }
+
+def generate_risk_strategies(data):
+    """Generate risk management strategies using Mistral"""
+    prompt = "Analyze market risks and suggest mitigation strategies, specifically only focuses on the risk factors and management"
+    
+    try:
+        analysis = mistral_analysis(prompt, data)
+        return parse_risk_analysis(analysis)
+    except Exception as e:
+        return default_risk_strategies()
+
+def filter_dataset_by_date(df, start_date, end_date):
+    """Filter dataset by date range with proper date format handling"""
+    try:
+        df = df.copy()
+        
+        if 'Quarter' in df.columns:
+            def parse_quarter(q):
+                try:
+                    if pd.isna(q):
+                        return pd.NaT
+                        
+                    q = str(q).strip()
+                    
+                    # Handle "2023Q3" format
+                    if len(q) == 6 and q[4] == 'Q':
+                        year = int(q[:4])
+                        quarter = int(q[5])
+                    # Handle "Q3-2023" format    
+                    elif q.startswith('Q') and '-' in q:
+                        parts = q.split('-')
+                        quarter = int(parts[0][1])
+                        year = int(parts[1])
+                    else:
+                        return pd.NaT
+                    
+                    if not (1 <= quarter <= 4):
+                        return pd.NaT
+                        
+                    month = ((quarter - 1) * 3) + 1
+                    return pd.Timestamp(f"{year}-{month:02d}-01")
+                    
+                except (ValueError, IndexError, TypeError):
+                    return pd.NaT
+
+            # Convert quarters to dates
+            df['Quarter'] = df['Quarter'].apply(parse_quarter)
+            date_col = 'Quarter'
+            
+        elif 'Time Period' in df.columns:
+            date_col = 'Time Period'
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        else:
+            return df
+
+        # Clean data
+        df = df.dropna(subset=[date_col])
+            
+        # Filter by date range
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date)
+        return df[df[date_col].between(start_ts, end_ts)]
+        
+    except Exception as e:
+        st.error(f"Error filtering data: {str(e)}")
+        return df
+
+def default_risk_strategies():
+    """Default risk strategies when analysis fails"""
+    return {
+        'strategies': [
+            {
+                'name': 'Market Volatility',
+                'description': 'Monitor price fluctuations and transaction volumes',
+                'confidence': 0.7
+            },
+            {
+                'name': 'Economic Factors',
+                'description': 'Track GDP, inflation, and interest rates',
+                'confidence': 0.8
+            },
+            {
+                'name': 'Regulatory Changes',
+                'description': 'Stay informed about property laws and regulations',
+                'confidence': 0.6
+            }
+        ],
+        'metrics': [
+            {
+                'label': 'Risk Score',
+                'value': '3.5/5',
+                'delta': '-0.2'
+            },
+            {
+                'label': 'Market Stability',
+                'value': '85%',
+                'delta': '+5%'
+            }
+        ]
+    }
+
+def parse_risk_analysis(analysis_text):
+    """Parse Mistral analysis into structured risk data"""
+    try:
+        risk_data = {
+            'strategies': [],
+            'metrics': []
+        }
+        
+        # Extract strategies
+        strategy_sections = analysis_text.split('\n\n')
+        for section in strategy_sections[:3]:
+            if section.strip():
+                name = section.split(':')[0].strip()
+                desc = section.split(':')[1].strip() if ':' in section else section
+                # Normalize confidence score between 0 and 1
+                confidence = min(max(round(0.5 + len(desc) / 200, 2), 0), 1)
+                risk_data['strategies'].append({
+                    'name': name,
+                    'description': desc,
+                    'confidence': confidence
+                })
+        
+        # Add default metrics if none found
+        if not risk_data['metrics']:
+            risk_data['metrics'] = default_risk_strategies()['metrics']
+            
+        return risk_data
+    except Exception as e:
+        st.error(f"Error parsing risk analysis: {str(e)}")
+        return default_risk_strategies()
 
 def config():    
     st.set_page_config(
@@ -604,33 +823,67 @@ def macroeconomic_tab():
         }
         st_echarts(indicator_chart)
 
-
-
 def investment_tab():
-    col1, col2 = st.columns(2)
+    # Fetch datasets
+    datasets = {
+        "Rental Market": fetch_data("rents_quarterly"),
+        "GDP Growth": fetch_data("gdp_quarterly_current_prices_df"),
+        "Consumer Price Index": fetch_data("consumer_price_index_monthly_df"),
+        "Population": fetch_data("population_indicators_df"),
+        "Property Transactions": fetch_data("transactions_df_quarterly_data")
+    }
+
+    # Sidebar controls
+    with st.sidebar:
+        st.markdown("### 📊 Analysis Configuration")
+        selected_datasets = st.multiselect(
+            "Select Data Sources",
+            list(datasets.keys()),
+            default=list(datasets.keys())[:2],
+            help="Choose datasets for analysis"
+        )
+
+        # Date range selector
+        st.markdown("### 📅 Time Period")
+        min_date = pd.Timestamp('2015-01-01')
+        max_date = pd.Timestamp('2024-12-31')
+        start_date, end_date = st.date_input(
+            "Analysis Period",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date
+        )
+
+    # Main content columns
+    col1, col2 = st.columns([3, 2])
+    
     with col1:
         st.markdown("""
-            <div class="analysis-card">
-                <h3>🎯 Investment Opportunities 💫</h3>
-                <ul>
-                    <li>🏢 Key Investment Areas</li>
-                    <li>⏰ Market Timing Indicators</li>
-                    <li>⚠️ Risk Factors</li>
-                </ul>
-            </div>
+                <h4>🎯 Investment Opportunities</h4>
         """, unsafe_allow_html=True)
-    
+
+        # Prepare analysis data
+        analysis_data = {
+            name: filter_dataset_by_date(datasets[name], start_date, end_date)
+            for name in selected_datasets
+        }
+
+        # Generate insights
+        if analysis_data:
+            with st.spinner("Generating market insights..."):
+                insights = generate_market_insights(analysis_data, start_date, end_date)
+        else:
+            st.warning("Please select at least one dataset for analysis")
+
     with col2:
         st.markdown("""
-            <div class="analysis-card">
-                <h3>🛡️ Risk Mitigation Strategies 📋</h3>
-                <ul>
-                    <li>📊 Portfolio Diversification</li>
-                    <li>🔍 Market Monitoring Tools</li>
-                    <li>🚪 Exit Strategies</li>
-                </ul>
-            </div>
+                <h4>🛡️ Risk Management</h4>
         """, unsafe_allow_html=True)
+
+        # Generate risk mitigation strategies
+        with st.spinner("Analyzing risks..."):
+            risk_analysis = generate_risk_strategies(analysis_data)
+            
 
 def correlation_tab():
     rental_data = fetch_data("rents_quarterly")
@@ -730,9 +983,119 @@ def correlation_tab():
         # Calculate correlation matrix
         corr_matrix = correlation_df.corr().round(2)
         
-        col1, col2 = st.columns([2,1])
+        st.markdown("### 📈 Time Series Analysis")
+        
+        # 1. Price vs GDP Growth
+        st.subheader("Property Prices vs Economic Indicators")
+        price_gdp_chart = {
+            "tooltip": {"trigger": "axis"},
+            "legend": {
+                "data": ["Average Rent", "GDP Growth", "CPI"]
+            },
+            "xAxis": {
+                "type": "category",
+                "data": rental_metrics.index.strftime('%Y-%m').tolist()
+            },
+            "yAxis": [
+                {"type": "value", "name": "Average Rent (AED)", "position": "left"},
+                {"type": "value", "name": "Growth Rate (%)", "position": "right"}
+            ],
+            "series": [
+                {
+                    "name": "Average Rent",
+                    "type": "line",
+                    "data": rental_metrics['Average_Rent'].tolist(),
+                    "smooth": True
+                },
+                {
+                    "name": "GDP Growth",
+                    "type": "line",
+                    "yAxisIndex": 1,
+                    "data": gdp_growth['GDP_Growth'].tolist(),
+                    "smooth": True
+                },
+                {
+                    "name": "CPI",
+                    "type": "line",
+                    "yAxisIndex": 1,
+                    "data": cpi_quarterly['CPI'].tolist(),
+                    "smooth": True
+                }
+            ],
+            "grid": {"right": "15%"},
+            "dataZoom": [{"type": "slider"}]
+        }
+        st_echarts(price_gdp_chart)
+
+        # 2. Transaction Volume vs Population
+        st.subheader("Market Activity vs Demographics")
+        col1, col2 = st.columns(2)
         
         with col1:
+            volume_pop_chart = {
+                "tooltip": {"trigger": "axis"},
+                "legend": {
+                    "data": ["Transaction Volume", "Population"]
+                },
+                "xAxis": {
+                    "type": "category",
+                    "data": rental_metrics.index.strftime('%Y-%m').tolist()
+                },
+                "yAxis": [
+                    {"type": "value", "name": "Transactions"},
+                    {"type": "value", "name": "Population"}
+                ],
+                "series": [
+                    {
+                        "name": "Transaction Volume",
+                        "type": "bar",
+                        "data": rental_metrics['Transaction_Volume'].tolist()
+                    },
+                    {
+                        "name": "Population",
+                        "type": "line",
+                        "yAxisIndex": 1,
+                        "data": population_clean['Population'].tolist(),
+                        "smooth": True
+                    }
+                ],
+                "dataZoom": [{"type": "slider"}]
+            }
+            st_echarts(volume_pop_chart)
+        
+        with col2:
+            # 3. Rolling Correlations
+            window = 4  # 1-year rolling window
+            rolling_corr = pd.DataFrame({
+                'GDP': rental_metrics['Average_Rent'].rolling(window).corr(gdp_growth['GDP_Growth']),
+                'CPI': rental_metrics['Average_Rent'].rolling(window).corr(cpi_quarterly['CPI']),
+                'Population': rental_metrics['Average_Rent'].rolling(window).corr(population_clean['Population'])
+            })
+            
+            rolling_corr_chart = {
+                "tooltip": {"trigger": "axis"},
+                "legend": {"data": ["GDP", "CPI", "Population"]},
+                "xAxis": {
+                    "type": "category",
+                    "data": rolling_corr.index.strftime('%Y-%m').tolist()
+                },
+                "yAxis": {"type": "value", "name": "Correlation Coefficient"},
+                "series": [
+                    {
+                        "name": indicator,
+                        "type": "line",
+                        "data": rolling_corr[indicator].tolist(),
+                        "smooth": True
+                    } for indicator in rolling_corr.columns
+                ],
+                "dataZoom": [{"type": "slider"}]
+            }
+            st_echarts(rolling_corr_chart, height="300px")
+            st.caption("Rolling Correlations (1-year window)")
+        
+        col3, col4 = st.columns([2,1])
+        
+        with col3:
             st.markdown("<h4> 📊 Correlation Heatmap</h4>", unsafe_allow_html=True)
             
             # Generate heatmap data with proper axis labels
@@ -788,7 +1151,7 @@ def correlation_tab():
             st_echarts(heatmap, height="600px")
             
             
-        with col2:
+        with col4:
             st.markdown("<h4> 📈 Data Coverage</h4>", unsafe_allow_html=True)
             st.write(f"Time period: {correlation_df.index.min()} to {correlation_df.index.max()}")
             st.write(f"Number of quarters: {len(correlation_df)}")
@@ -798,29 +1161,29 @@ def correlation_tab():
                 st.write(f"{col}: {pct_complete}%")
         
         
-            st.markdown("<h4> 🔍 Key Insights</h4>", unsafe_allow_html=True)
+            st.markdown("#### 🔍 Key Insights")
+            
             valid_correlations = [
                 {
-                    'factor1': col1,
+                    'factor1': col1,  
                     'factor2': col2,
                     'correlation': float(corr_matrix.loc[col1, col2])
                 }
                 for col1 in corr_matrix.columns
-                for col2 in corr_matrix.columns
+                for col2 in corr_matrix.columns 
                 if col1 < col2 and not pd.isna(corr_matrix.loc[col1, col2])
             ]
             
             valid_correlations.sort(key=lambda x: abs(x['correlation']), reverse=True)
             
             for corr in valid_correlations[:5]:
-                st.markdown(f"""
-                    <div style='padding:10px; background-color:#f0f2f6; border-radius:5px; margin:5px;'>
-                        <b>{corr['factor1']}</b> vs <b>{corr['factor2']}</b><br>
-                        {'Strong' if abs(corr['correlation']) > 0.7 else 'Moderate'} 
-                        {'positive' if corr['correlation'] > 0 else 'negative'} 
-                        correlation: {corr['correlation']:.2f}
-                    </div>
-                """, unsafe_allow_html=True)
+                with st.container():
+                    container_content = st.container()
+                    container_content.write(f"{corr['factor1']} vs {corr['factor2']}")
+                    strength = 'Strong' if abs(corr['correlation']) > 0.7 else 'Moderate'
+                    direction = 'positive' if corr['correlation'] > 0 else 'negative'
+                    container_content.write(f"{strength} {direction} correlation: {corr['correlation']:.2f}")
+                st.divider()
                 
     except Exception as e:
         st.error(f"Error in correlation analysis: {str(e)}")
