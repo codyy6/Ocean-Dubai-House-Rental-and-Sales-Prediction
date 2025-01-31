@@ -292,6 +292,9 @@ def parse_quarter(q_str):
     quarter = int(q_str[-1])
     return pd.Period(year=year, quarter=quarter, freq='Q')
 
+def prepare_chart_data(df):
+    """Clean and prepare data for charts"""
+    return [float(x) if pd.notnull(x) else None for x in df]
 
 def get_coordinates(address):
     url = f"https://api.geoapify.com/v1/geocode/search?text={address}, Dubai, UAE&apiKey={GEOAPIFY}"
@@ -947,7 +950,6 @@ def correlation_tab():
         population_clean = population_clean.sort_index()
         population_clean = population_clean[~population_clean.index.duplicated(keep='first')]
 
-
         # Create common index
         start_date = min(
             rental_metrics.index.min(),
@@ -985,8 +987,12 @@ def correlation_tab():
         
         st.markdown("### 📈 Time Series Analysis")
         
-        # 1. Price vs GDP Growth
-        st.subheader("Property Prices vs Economic Indicators")
+        rental_metrics_clean = rental_metrics.fillna(method='ffill')
+        gdp_growth_clean = gdp_growth.fillna(method='ffill')
+        cpi_quarterly_clean = cpi_quarterly.fillna(method='ffill')
+        population_clean = population_clean.fillna(method='ffill')
+
+        # Price vs Economic Indicators
         price_gdp_chart = {
             "tooltip": {"trigger": "axis"},
             "legend": {
@@ -994,7 +1000,7 @@ def correlation_tab():
             },
             "xAxis": {
                 "type": "category",
-                "data": rental_metrics.index.strftime('%Y-%m').tolist()
+                "data": rental_metrics_clean.index.strftime('%Y-%m').tolist()
             },
             "yAxis": [
                 {"type": "value", "name": "Average Rent (AED)", "position": "left"},
@@ -1004,94 +1010,87 @@ def correlation_tab():
                 {
                     "name": "Average Rent",
                     "type": "line",
-                    "data": rental_metrics['Average_Rent'].tolist(),
+                    "data": prepare_chart_data(rental_metrics_clean['Average_Rent']),
                     "smooth": True
                 },
                 {
                     "name": "GDP Growth",
                     "type": "line",
                     "yAxisIndex": 1,
-                    "data": gdp_growth['GDP_Growth'].tolist(),
+                    "data": prepare_chart_data(gdp_growth_clean['GDP_Growth']),
                     "smooth": True
                 },
                 {
                     "name": "CPI",
                     "type": "line",
                     "yAxisIndex": 1,
-                    "data": cpi_quarterly['CPI'].tolist(),
+                    "data": prepare_chart_data(cpi_quarterly_clean['CPI']),
                     "smooth": True
                 }
             ],
-            "grid": {"right": "15%"},
             "dataZoom": [{"type": "slider"}]
         }
         st_echarts(price_gdp_chart)
 
-        # 2. Transaction Volume vs Population
-        st.subheader("Market Activity vs Demographics")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            volume_pop_chart = {
-                "tooltip": {"trigger": "axis"},
-                "legend": {
-                    "data": ["Transaction Volume", "Population"]
+        # Volume vs Population
+        volume_pop_chart = {
+            "tooltip": {"trigger": "axis"},
+            "legend": {
+                "data": ["Transaction Volume", "Population"]
+            },
+            "xAxis": {
+                "type": "category",
+                "data": rental_metrics_clean.index.strftime('%Y-%m').tolist()
+            },
+            "yAxis": [
+                {"type": "value", "name": "Transactions"},
+                {"type": "value", "name": "Population"}
+            ],
+            "series": [
+                {
+                    "name": "Transaction Volume",
+                    "type": "bar",
+                    "data": prepare_chart_data(rental_metrics_clean['Transaction_Volume'])
                 },
-                "xAxis": {
-                    "type": "category",
-                    "data": rental_metrics.index.strftime('%Y-%m').tolist()
-                },
-                "yAxis": [
-                    {"type": "value", "name": "Transactions"},
-                    {"type": "value", "name": "Population"}
-                ],
-                "series": [
-                    {
-                        "name": "Transaction Volume",
-                        "type": "bar",
-                        "data": rental_metrics['Transaction_Volume'].tolist()
-                    },
-                    {
-                        "name": "Population",
-                        "type": "line",
-                        "yAxisIndex": 1,
-                        "data": population_clean['Population'].tolist(),
-                        "smooth": True
-                    }
-                ],
-                "dataZoom": [{"type": "slider"}]
-            }
-            st_echarts(volume_pop_chart)
-        
-        with col2:
-            # 3. Rolling Correlations
-            window = 4  # 1-year rolling window
-            rolling_corr = pd.DataFrame({
-                'GDP': rental_metrics['Average_Rent'].rolling(window).corr(gdp_growth['GDP_Growth']),
-                'CPI': rental_metrics['Average_Rent'].rolling(window).corr(cpi_quarterly['CPI']),
-                'Population': rental_metrics['Average_Rent'].rolling(window).corr(population_clean['Population'])
-            })
-            
-            rolling_corr_chart = {
-                "tooltip": {"trigger": "axis"},
-                "legend": {"data": ["GDP", "CPI", "Population"]},
-                "xAxis": {
-                    "type": "category",
-                    "data": rolling_corr.index.strftime('%Y-%m').tolist()
-                },
-                "yAxis": {"type": "value", "name": "Correlation Coefficient"},
-                "series": [
-                    {
-                        "name": indicator,
-                        "type": "line",
-                        "data": rolling_corr[indicator].tolist(),
-                        "smooth": True
-                    } for indicator in rolling_corr.columns
-                ],
-                "dataZoom": [{"type": "slider"}]
-            }
-            st_echarts(rolling_corr_chart, height="300px")
-            st.caption("Rolling Correlations (1-year window)")
+                {
+                    "name": "Population",
+                    "type": "line",
+                    "yAxisIndex": 1,
+                    "data": prepare_chart_data(population_clean['Population']),
+                    "smooth": True
+                }
+            ],
+            "dataZoom": [{"type": "slider"}]
+        }
+        st_echarts(volume_pop_chart)
+
+        # Rolling Correlations
+        window = 4
+        rolling_corr = pd.DataFrame({
+            'GDP': rental_metrics_clean['Average_Rent'].rolling(window).corr(gdp_growth_clean['GDP_Growth']),
+            'CPI': rental_metrics_clean['Average_Rent'].rolling(window).corr(cpi_quarterly_clean['CPI']),
+            'Population': rental_metrics_clean['Average_Rent'].rolling(window).corr(population_clean['Population'])
+        })
+
+        rolling_corr_chart = {
+            "tooltip": {"trigger": "axis"},
+            "legend": {"data": ["GDP", "CPI", "Population"]},
+            "xAxis": {
+                "type": "category",
+                "data": rolling_corr.index.strftime('%Y-%m').tolist()
+            },
+            "yAxis": {"type": "value", "name": "Correlation"},
+            "series": [
+                {
+                    "name": col,
+                    "type": "line",
+                    "data": prepare_chart_data(rolling_corr[col]),
+                    "smooth": True
+                } for col in rolling_corr.columns
+            ],
+            "dataZoom": [{"type": "slider"}]
+        }
+        st_echarts(rolling_corr_chart)
         
         col3, col4 = st.columns([2,1])
         
